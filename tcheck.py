@@ -13,10 +13,11 @@ import tqdm
 
 class TorrentChecker(object):
   def __init__(self, datadir=pathlib.Path('.'), data_file_globs=["**"],
-               checkers=None):
+               checkers=None, pieces=None):
     self._data_file_globs = data_file_globs
     self._datadir = datadir
     self._checkers = checkers
+    self._pieces = pieces
     self._logger = logging.getLogger("TorrentChecker")
     self._cancelled = False
 
@@ -56,6 +57,9 @@ class TorrentChecker(object):
     return hasher.hexdigest()
 
   def _Check(self, datadir, piece_index, piece_sha1, piece_len, paths, offset):
+    if self._pieces and piece_index not in self._pieces:
+      #self._logger.warning('skipped %d', piece_index)
+      return
     sha1 = self._GetPieceHash(datadir, piece_index, piece_len, paths, offset)
     if piece_sha1 == sha1:
       #logging.info(
@@ -88,8 +92,9 @@ class TorrentChecker(object):
         newly_covered_bytes = min(piece_len - bytes_covered_total, effective_size)
         bytes_covered_total += newly_covered_bytes
         offset += newly_covered_bytes
-        #logging.debug("offset = %d, bct = %d, size = %d", offset,
-        #    bytes_covered_total, size)
+        #logging.debug("piece = %d, offset = %d, bct = %d, size = %d",
+            #piece_index, offset,
+            #bytes_covered_total, size)
         if offset == size:
           #logging.debug("resetting offset")
           offset = 0
@@ -110,8 +115,13 @@ class TorrentChecker(object):
     info = parsed['info']
     piece_len = info['piece length']
     pieces = info['pieces']
-    file_infos = info['files']
+    file_infos = None
     torrent_name = info['name']
+    if 'files' in info:
+      file_infos = info['files']
+    else:
+      file_infos = [info]
+      info['path'] = [f'{self._datadir}/{torrent_name}']
 
     datadir = pathlib.Path(self._datadir, torrent_name)
 
@@ -148,14 +158,26 @@ def main():
   parser.add_argument('--checkers', default=None, type=int)
   parser.add_argument('--loglevel', default=None, type=str)
   parser.add_argument('--datadir', default=pathlib.Path('.'), type=pathlib.Path)
+  parser.add_argument('--pieces', default=None, type=str)
   args = parser.parse_args()
 
   logging.basicConfig(level=getattr(logging, args.loglevel.upper()))
 
+  pieces = None
+
+  if args.pieces:
+    pieces = args.pieces.split('-')
+    if len(pieces) == 1:
+      pieces = int(pieces[0])
+      pieces = range(pieces, pieces + 1)
+    else:
+      pieces = range(int(pieces[0]), int(pieces[1]))
+
   checker = TorrentChecker(
     data_file_globs=args.data_file_globs,
     datadir=args.datadir,
-    checkers=args.checkers)
+    checkers=args.checkers,
+    pieces=pieces)
   checker.CheckTorrent(args.torrent_file)
 
 if __name__ == '__main__':
